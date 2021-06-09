@@ -932,6 +932,8 @@ extern int rfbMaxClientConnections;
 extern int rfbMaxClientWait;
 
 extern int rfbPort;
+extern const char *rfbUnixPath;
+extern int rfbUnixMode;
 extern int rfbListenSock;
 
 extern void rfbInitSockets(void);
@@ -947,6 +949,7 @@ extern int ReadExactTimeout(rfbClientPtr cl, char *buf, int len, int timeout);
 extern int SkipExact(rfbClientPtr cl, int len);
 extern int WriteExact(rfbClientPtr cl, char *buf, int len);
 extern int ListenOnTCPPort(int port);
+extern int ListenOnUnixDomainSocket(const char *path, int mode);
 extern int ConnectToTcpAddr(char *host, int port);
 
 extern const char *sockaddr_string(rfbSockAddr *addr, char *buf, int len);

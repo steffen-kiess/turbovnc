@@ -364,6 +364,22 @@ int ddxProcessArgument(int argc, char *argv[], int i)
     return 2;
   }
 
+  if (strcasecmp(argv[i], "-rfbunixpath") == 0) {  /* -rfbunixpath path */
+    REQUIRE_ARG();
+    rfbUnixPath = argv[i + 1];
+    return 2;
+  }
+
+  if (strcasecmp(argv[i], "-rfbunixmode") == 0) {  /* -rfbunixmode mode */
+    char *ptr;
+    REQUIRE_ARG();
+    rfbUnixMode = strtol(argv[i + 1], &ptr, 8);
+    if (argv[i + 1] + strlen(argv[i + 1]) != ptr || rfbUnixMode < 0 ||
+        rfbUnixMode > 0777)
+      FatalError("Invalid -rfbunixmode parameter\n");
+    return 2;
+  }
+
   if (strcasecmp(argv[i], "-rfbwait") == 0) {  /* -rfbwait ms */
     REQUIRE_ARG();
     rfbMaxClientWait = atoi(argv[i + 1]);
@@ -1645,6 +1661,8 @@ void ddxUseMsg(void)
   ErrorF("                       mouse button)\n");
   ErrorF("-noreverse             disable reverse connections\n");
   ErrorF("-rfbport port          TCP port for RFB protocol\n");
+  ErrorF("-rfbunixpath path      Unix domain socket path for RFB protocol\n");
+  ErrorF("-rfbunixmode mode      Mode for unix domain socket\n");
   ErrorF("-rfbwait time          max time in ms to wait for a send/receive operation\n");
   ErrorF("                       to/from a connected viewer to complete [default: %d]\n",
          DEFAULT_MAX_CLIENT_WAIT);
