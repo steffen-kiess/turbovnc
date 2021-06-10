@@ -46,6 +46,7 @@ import com.turbovnc.rdr.*;
 import com.turbovnc.rfb.*;
 import com.turbovnc.rfb.Point;
 import com.turbovnc.network.Socket;
+import com.turbovnc.network.StreamSocket;
 import com.turbovnc.network.TcpSocket;
 
 public class CConn extends CConnection implements UserPasswdGetter,
@@ -63,6 +64,45 @@ public class CConn extends CConnection implements UserPasswdGetter,
   static final PixelFormat HIGH_COLOR_PF =
     new PixelFormat(16, 16, false, true, 31, 63, 31, 11, 5, 0);
   static final int SUPER_MASK = 1 << 16;
+
+  private static final String DEFAULT_SSH_CMD =
+    (Utils.isWindows() ? "ssh.exe" : "/usr/bin/ssh");
+
+  // Escape the string for a posix shell.
+  // Expand %d to the remote home directory, %i to the remote (numeric) user ID
+  // and %u to the remote username.
+  private static String escapeUnixDomainPath(String s) {
+    String result = "'";
+
+    for (int i = 0; i < s.length(); i++) {
+      if (s.charAt(i) == '\'') {
+        // Replace ' by '\''
+        result += "'\\''";
+        continue;
+      }
+      if (s.charAt(i) == '%') {
+        switch (s.charAt(++i)) {
+          case '%':
+            break;
+          case 'd':
+            result += "'\"$HOME\"'";
+            continue;
+          case 'i':
+            result += "'\"$(id -u)\"'";
+            continue;
+          case 'u':
+            result += "'\"$(id -u -n)\"'";
+            continue;
+          default:
+            throw new ErrorException("Invalid % sequence in unix domain path: %" + s.charAt(i));
+        }
+      }
+      result += s.charAt(i);
+    }
+
+    result += "'";
+    return result;
+  }
 
   // RFB thread
   public CConn(VncViewer viewer_, Socket sock_) {
@@ -120,6 +160,7 @@ public class CConn extends CConnection implements UserPasswdGetter,
           !Params.alwaysShowConnectionDialog.getValue()) {
         if (opts.via == null || opts.via.indexOf(':') < 0) {
           port = opts.port = Hostname.getPort(opts.serverName);
+          opts.unixDomainPath = Hostname.getUnixDomainPath(opts.serverName);
           serverName = opts.serverName = Hostname.getHost(opts.serverName);
         }
       } else {
@@ -133,12 +174,93 @@ public class CConn extends CConnection implements UserPasswdGetter,
         serverName = opts.serverName;
       }
 
-      if (opts.via != null && opts.via.indexOf(':') >= 0) {
-        port = Hostname.getPort(opts.via);
-        serverName = Hostname.getHost(opts.via);
-      } else if (opts.via != null || opts.tunnel ||
-                 (opts.port == 0 && Params.sessMgrAuto.getValue())) {
-        if (opts.port == 0) {
+      if (opts.unixDomainPath != null) {
+        ArrayList<String> args = new ArrayList<String>();
+
+        if (opts.serverName.equals("localhost") && opts.via == null) {
+          args.add("sh");
+          args.add("-c");
+        } else {
+          // TODO: Add support for JSch
+
+          String sshCommand = System.getenv("VNC_SSH_CMD");
+          if (sshCommand == null)
+            sshCommand = DEFAULT_SSH_CMD;
+
+          args.add(sshCommand);
+          args.add("-ax");
+          if (opts.via != null) {
+            args.add("-J");
+            args.add(opts.via);
+          }
+          args.add("--");
+          if (opts.sshUser != null)
+            args.add(opts.sshUser + "@" + opts.serverName);
+          else
+            args.add(opts.serverName);
+        }
+
+        String command = "exec socat stdio unix-connect:\\\"" + escapeUnixDomainPath(opts.unixDomainPath) + "\\\"";
+        args.add(command);
+
+        vlog.debug("SSH command line: " + String.join(" ", args));
+        ProcessBuilder pb = new ProcessBuilder(args);
+        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+        Process p;
+        try {
+          p = pb.start();
+        } catch (Exception e) {
+          throw new ErrorException("External SSH error");
+        }
+
+        sock = new StreamSocket(p.getInputStream(), p.getOutputStream(), true);
+        if (opts.serverName.equals("localhost"))
+          vlog.info("connected to socket " + opts.unixDomainPath);
+        else
+          vlog.info("connected over ssh to host " + opts.serverName + " socket " + opts.unixDomainPath);
+      } else {
+        if (opts.via != null && opts.via.indexOf(':') >= 0) {
+          port = Hostname.getPort(opts.via);
+          serverName = Hostname.getHost(opts.via);
+        } else if (opts.via != null || opts.tunnel ||
+                   (opts.port == 0 && Params.sessMgrAuto.getValue())) {
+          if (opts.port == 0) {
+            try {
+              // TurboVNC Session Manager
+              String session = SessionManager.createSession(opts);
+              if (session == null) {
+                close();
+                return;
+              }
+              if (Params.sessMgrAuto.getValue()) {
+                Security.disableSecType(RFB.SECTYPE_NONE);
+                Security.disableSecType(RFB.SECTYPE_TLS_NONE);
+                Security.disableSecType(RFB.SECTYPE_X509_NONE);
+                Security.disableSecType(RFB.SECTYPE_TLS_VNC);
+                Security.disableSecType(RFB.SECTYPE_X509_VNC);
+                Security.disableSecType(RFB.SECTYPE_PLAIN);
+                Security.disableSecType(RFB.SECTYPE_TLS_PLAIN);
+                Security.disableSecType(RFB.SECTYPE_X509_PLAIN);
+                Security.disableSecType(RFB.SECTYPE_UNIX_LOGIN);
+                opts.tunnel = true;
+              }
+              opts.port = Hostname.getPort(session);
+            } catch (Exception e) {
+              throw new ErrorException("Session Manager Error:\n" +
+                                       e.getMessage());
+            }
+          }
+          try {
+            Tunnel.createTunnel(opts);
+            port = Hostname.getPort(opts.serverName);
+            serverName = Hostname.getHost(opts.serverName);
+          } catch (Exception e) {
+            throw new ErrorException("Could not create SSH tunnel:\n" +
+                                     e.getMessage());
+          }
+        }
+
+        if (port == 0) {
           try {
             // TurboVNC Session Manager
             String session = SessionManager.createSession(opts);
@@ -146,52 +268,17 @@ public class CConn extends CConnection implements UserPasswdGetter,
               close();
               return;
             }
-            if (Params.sessMgrAuto.getValue()) {
-              Security.disableSecType(RFB.SECTYPE_NONE);
-              Security.disableSecType(RFB.SECTYPE_TLS_NONE);
-              Security.disableSecType(RFB.SECTYPE_X509_NONE);
-              Security.disableSecType(RFB.SECTYPE_TLS_VNC);
-              Security.disableSecType(RFB.SECTYPE_X509_VNC);
-              Security.disableSecType(RFB.SECTYPE_PLAIN);
-              Security.disableSecType(RFB.SECTYPE_TLS_PLAIN);
-              Security.disableSecType(RFB.SECTYPE_X509_PLAIN);
-              Security.disableSecType(RFB.SECTYPE_UNIX_LOGIN);
-              opts.tunnel = true;
-            }
-            opts.port = Hostname.getPort(session);
+            port = Hostname.getPort(session);
+            opts.sshSession.disconnect();
           } catch (Exception e) {
             throw new ErrorException("Session Manager Error:\n" +
                                      e.getMessage());
           }
         }
-        try {
-          Tunnel.createTunnel(opts);
-          port = Hostname.getPort(opts.serverName);
-          serverName = Hostname.getHost(opts.serverName);
-        } catch (Exception e) {
-          throw new ErrorException("Could not create SSH tunnel:\n" +
-                                   e.getMessage());
-        }
-      }
 
-      if (port == 0) {
-        try {
-          // TurboVNC Session Manager
-          String session = SessionManager.createSession(opts);
-          if (session == null) {
-            close();
-            return;
-          }
-          port = Hostname.getPort(session);
-          opts.sshSession.disconnect();
-        } catch (Exception e) {
-          throw new ErrorException("Session Manager Error:\n" +
-                                   e.getMessage());
-        }
+        sock = new TcpSocket(serverName, port);
+        vlog.info("connected to host " + serverName + " port " + port);
       }
-
-      sock = new TcpSocket(serverName, port);
-      vlog.info("connected to host " + serverName + " port " + port);
     }
 
     if (benchmark) {

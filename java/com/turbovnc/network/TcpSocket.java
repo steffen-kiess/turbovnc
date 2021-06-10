@@ -86,28 +86,31 @@ public class TcpSocket extends Socket {
     ownStreams = true;
   }
 
+  public SocketDescriptor getFd() {
+    return (SocketDescriptor)((FdOutStream)outStream()).getFd();
+  }
+
   public int getMyPort() {
-    SocketAddress address =
-      ((SocketDescriptor)getFd()).socket().getLocalSocketAddress();
+    SocketAddress address = getFd().socket().getLocalSocketAddress();
     return ((InetSocketAddress)address).getPort();
   }
 
   public String getPeerAddress() {
-    InetAddress peer = ((SocketDescriptor)getFd()).socket().getInetAddress();
+    InetAddress peer = getFd().socket().getInetAddress();
     if (peer != null)
       return peer.getHostAddress();
     return "";
   }
 
   public String getPeerName() {
-    InetAddress peer = ((SocketDescriptor)getFd()).socket().getInetAddress();
+    InetAddress peer = getFd().socket().getInetAddress();
     if (peer != null)
       return peer.getHostName();
     return "";
   }
 
   public int getPeerPort() {
-    int port = ((SocketDescriptor)getFd()).socket().getPort();
+    int port = getFd().socket().getPort();
     return port;
   }
 
@@ -118,18 +121,18 @@ public class TcpSocket extends Socket {
   }
 
   public boolean sameMachine() {
-    SocketAddress peeraddr = ((SocketDescriptor)getFd()).getRemoteAddress();
-    SocketAddress myaddr = ((SocketDescriptor)getFd()).getLocalAddress();
+    SocketAddress peeraddr = getFd().getRemoteAddress();
+    SocketAddress myaddr = getFd().getLocalAddress();
     return myaddr.equals(peeraddr);
   }
 
   public void shutdown() {
     super.shutdown();
-    ((SocketDescriptor)getFd()).shutdown();
+    getFd().shutdown();
   }
 
   public void close() {
-    ((SocketDescriptor)getFd()).close();
+    getFd().close();
   }
 
   public static boolean enableNagles(SocketDescriptor sock, boolean enable) {
@@ -148,12 +151,11 @@ public class TcpSocket extends Socket {
   }
 
   public boolean isConnected() {
-    return ((SocketDescriptor)getFd()).isConnected();
+    return getFd().isConnected();
   }
 
   public int getSockPort() {
-    SocketAddress address =
-      ((SocketDescriptor)getFd()).socket().getRemoteSocketAddress();
+    SocketAddress address = getFd().socket().getRemoteSocketAddress();
     return ((InetSocketAddress)address).getPort();
   }
 

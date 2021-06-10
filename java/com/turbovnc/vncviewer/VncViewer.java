@@ -537,6 +537,7 @@ public class VncViewer implements Runnable, OptionsDialogCallback {
     sock = sock_;
     opts.serverName = null;
     opts.port = -1;
+    opts.unixDomainPath = null;
   }
 
   public static void newViewer(VncViewer oldViewer, Socket sock,

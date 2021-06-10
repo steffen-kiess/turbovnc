@@ -395,6 +395,16 @@ public abstract class InStream {
 
   protected abstract int overrun(int itemSize, int nItems, boolean wait);
 
+  public double getReadTime() { return 0; }
+  public void resetReadTime() {}
+  public double getBytesRead() { return 0; }
+  public void resetBytesRead() {}
+
+  public void startTiming() {}
+  public void stopTiming() {}
+
+  public void setBlockCallback(FdInStreamBlockCallback blockCallback_) {}
+  
   protected InStream() {}
   protected byte[] b;
   protected int ptr;

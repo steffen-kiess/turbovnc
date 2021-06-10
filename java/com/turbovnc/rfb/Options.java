@@ -59,6 +59,8 @@ public class Options {
     if (old.serverName != null)
       serverName = new String(old.serverName);
     shared = old.shared;
+    if (old.unixDomainPath != null)
+      unixDomainPath = new String(old.unixDomainPath);
 
     fsAltEnter = old.fsAltEnter;
     grabKeyboard = old.grabKeyboard;
@@ -205,6 +207,7 @@ public class Options {
     printOpt("sendClipboard", sendClipboard);
     printOpt("serverName", serverName);
     printOpt("shared", shared);
+    printOpt("unixDomainPath", unixDomainPath);
 
     printOpt("fsAltEnter", fsAltEnter);
     printOpt("grabKeyboard", grabKeyboard);
@@ -304,6 +307,7 @@ public class Options {
   public boolean sendClipboard;
   public String serverName;
   public boolean shared;
+  public String unixDomainPath;
   // INPUT OPTIONS
   public boolean fsAltEnter;
   public int grabKeyboard;

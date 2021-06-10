@@ -27,20 +27,12 @@ import java.nio.channels.*;
 
 public abstract class Socket {
 
-  public Socket(FileDescriptor fd) {
-    instream = new FdInStream(fd);
-    outstream = new FdOutStream(fd);
-    ownStreams = true;  isShutdown = false;
-    queryConnection = false;
-  }
-
-  public FdInStream inStream() { return instream; }
-  public FdOutStream outStream() { return outstream; }
-  public FileDescriptor getFd() { return outstream.getFd(); }
+  public InStream inStream() { return instream; }
+  public OutStream outStream() { return outstream; }
 
   // if shutdown() is overridden then the override MUST call on to here
   public void shutdown() { isShutdown = true; }
-  public void close() { getFd().close(); }
+  public abstract void close();
   public final boolean isShutdown() { return isShutdown; }
 
   // information about this end of the socket
@@ -64,13 +56,13 @@ public abstract class Socket {
     isShutdown = false;  queryConnection = false;
   }
 
-  protected Socket(FdInStream i, FdOutStream o, boolean own) {
+  protected Socket(InStream i, OutStream o, boolean own) {
     instream = i;  outstream = o;  ownStreams = own;
     isShutdown = false;  queryConnection = false;
   }
 
-  protected FdInStream instream;
-  protected FdOutStream outstream;
+  protected InStream instream;
+  protected OutStream outstream;
   boolean ownStreams;
   boolean isShutdown;
   boolean queryConnection;
