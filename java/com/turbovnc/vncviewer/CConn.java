@@ -46,7 +46,10 @@ import com.turbovnc.rdr.*;
 import com.turbovnc.rfb.*;
 import com.turbovnc.rfb.Point;
 import com.turbovnc.network.Socket;
+import com.turbovnc.network.StreamSocket;
 import com.turbovnc.network.TcpSocket;
+
+import com.jcraft.jsch.*;
 
 public class CConn extends CConnection implements UserPasswdGetter,
   OptionsDialogCallback, FdInStreamBlockCallback {
@@ -63,6 +66,45 @@ public class CConn extends CConnection implements UserPasswdGetter,
   static final PixelFormat HIGH_COLOR_PF =
     new PixelFormat(16, 16, false, true, 31, 63, 31, 11, 5, 0);
   static final int SUPER_MASK = 1 << 16;
+
+  private static final String DEFAULT_SSH_CMD =
+    (Utils.isWindows() ? "ssh.exe" : "/usr/bin/ssh");
+
+  // Escape the string for a posix shell.
+  // Expand %d to the remote home directory, %i to the remote (numeric) user ID
+  // and %u to the remote username.
+  private static String escapeUnixDomainPath(String s) {
+    String result = "'";
+
+    for (int i = 0; i < s.length(); i++) {
+      if (s.charAt(i) == '\'') {
+        // Replace ' by '\''
+        result += "'\\''";
+        continue;
+      }
+      if (s.charAt(i) == '%') {
+        switch (s.charAt(++i)) {
+          case '%':
+            break;
+          case 'd':
+            result += "'\"$HOME\"'";
+            continue;
+          case 'i':
+            result += "'\"$(id -u)\"'";
+            continue;
+          case 'u':
+            result += "'\"$(id -u -n)\"'";
+            continue;
+          default:
+            throw new ErrorException("Invalid % sequence in unix domain path: %" + s.charAt(i));
+        }
+      }
+      result += s.charAt(i);
+    }
+
+    result += "'";
+    return result;
+  }
 
   // RFB thread
   public CConn(VncViewer viewer_, Socket sock_) {
@@ -120,6 +162,7 @@ public class CConn extends CConnection implements UserPasswdGetter,
           !Params.alwaysShowConnectionDialog.getValue()) {
         if (opts.via == null || opts.via.indexOf(':') < 0) {
           port = opts.port = Hostname.getPort(opts.serverName);
+          opts.unixDomainPath = Hostname.getUnixDomainPath(opts.serverName);
           serverName = opts.serverName = Hostname.getHost(opts.serverName);
         }
       } else {
@@ -133,12 +176,170 @@ public class CConn extends CConnection implements UserPasswdGetter,
         serverName = opts.serverName;
       }
 
-      if (opts.via != null && opts.via.indexOf(':') >= 0) {
-        port = Hostname.getPort(opts.via);
-        serverName = Hostname.getHost(opts.via);
-      } else if (opts.via != null || opts.tunnel ||
-                 (opts.port == 0 && Params.sessMgrAuto.getValue())) {
-        if (opts.port == 0) {
+      if (opts.unixDomainPath != null) {
+        String command = "exec socat stdio unix-connect:\\\"" + escapeUnixDomainPath(opts.unixDomainPath) + "\\\"";
+        if (opts.extSSH ||
+            (opts.serverName.equals("localhost") && opts.via == null)) {
+          ArrayList<String> args = new ArrayList<String>();
+
+          if (opts.serverName.equals("localhost") && opts.via == null) {
+            args.add("sh");
+            args.add("-c");
+          } else {
+            String sshCommand = System.getenv("VNC_SSH_CMD");
+            if (sshCommand == null)
+              sshCommand = DEFAULT_SSH_CMD;
+
+            args.add(sshCommand);
+            args.add("-ax");
+            if (opts.via != null) {
+              args.add("-J");
+              args.add(opts.via);
+            }
+            args.add("--");
+            if (opts.sshUser != null)
+              args.add(opts.sshUser + "@" + opts.serverName);
+            else
+              args.add(opts.serverName);
+          }
+
+          args.add(command);
+
+          vlog.debug("SSH command line: " + String.join(" ", args));
+          ProcessBuilder pb = new ProcessBuilder(args);
+          pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+          Process p;
+          try {
+            p = pb.start();
+          } catch (Exception e) {
+            throw new ErrorException("External SSH error: " + e.getMessage());
+          }
+
+          sock = new StreamSocket(p.getInputStream(), p.getOutputStream(), true);
+        } else {
+          try {
+            // Use JSch
+            com.jcraft.jsch.Proxy proxy = null;
+            if (opts.via != null) {
+              vlog.debug("Opening outer SSH tunnel to " + opts.via);
+              Session outerSession = Tunnel.createTunnelJSch(opts.via, opts);
+
+              vlog.debug("Connecting over tunnel to " + opts.serverName + ":22");
+              ChannelDirectTCPIP channel = (ChannelDirectTCPIP)outerSession.openChannel("direct-tcpip");
+              channel.setHost(opts.serverName);
+              channel.setPort(22);
+              PipedInputStream toRemotePipeIn = new PipedInputStream();
+              PipedOutputStream toRemotePipeOut = new PipedOutputStream(toRemotePipeIn);
+              PipedInputStream fromRemotePipeIn = new PipedInputStream();
+              PipedOutputStream fromRemotePipeOut = new PipedOutputStream(fromRemotePipeIn);
+              channel.setInputStream(toRemotePipeIn);
+              channel.setOutputStream(fromRemotePipeOut);
+              channel.connect();
+
+              proxy = new com.jcraft.jsch.Proxy() {
+                public void connect(SocketFactory socket_factory, String host, int port, int timeout) throws Exception {
+                }
+
+                public InputStream getInputStream() {
+                  return fromRemotePipeIn;
+                }
+
+                public OutputStream getOutputStream() {
+                  return toRemotePipeOut;
+                }
+
+                public java.net.Socket getSocket() {
+                  return null;
+                }
+
+                public void close() {
+                  channel.disconnect();
+                  outerSession.disconnect();
+                }
+              };
+            }
+
+            vlog.debug("Opening SSH tunnel to " + opts.serverName);
+            opts.sshSession = Tunnel.createTunnelJSch(opts.serverName, opts, proxy);
+
+            ChannelExec channelExec = (ChannelExec)opts.sshSession.openChannel("exec");
+            channelExec.setCommand(command);
+            InputStream stdout = channelExec.getInputStream();
+            InputStream stderr = channelExec.getErrStream();
+            OutputStream stdin = channelExec.getOutputStream();
+            channelExec.connect();
+
+            Thread thread = new Thread() {
+              public void run() {
+                byte[] buffer = new byte[1024];
+                try {
+                  while (true) {
+                    int len = stderr.read(buffer, 0, buffer.length);
+                    if (len < 0)
+                      return;
+                    System.err.write(buffer, 0, len);
+                  }
+                } catch (IOException e) {
+                  throw new ErrorException("Error reading error stream: " + e.getMessage());
+                }
+              }
+            };
+            thread.start();
+
+            sock = new StreamSocket(stdout, stdin, true);
+          } catch (Exception e) {
+            throw new ErrorException("JSch error: " + e);
+            //throw new RuntimeException(e);
+          }
+        }
+
+        if (opts.serverName.equals("localhost"))
+          vlog.info("connected to socket " + opts.unixDomainPath);
+        else
+          vlog.info("connected over ssh to host " + opts.serverName + " socket " + opts.unixDomainPath);
+      } else {
+        if (opts.via != null && opts.via.indexOf(':') >= 0) {
+          port = Hostname.getPort(opts.via);
+          serverName = Hostname.getHost(opts.via);
+        } else if (opts.via != null || opts.tunnel ||
+                   (opts.port == 0 && Params.sessMgrAuto.getValue())) {
+          if (opts.port == 0) {
+            try {
+              // TurboVNC Session Manager
+              String session = SessionManager.createSession(opts);
+              if (session == null) {
+                close();
+                return;
+              }
+              if (Params.sessMgrAuto.getValue()) {
+                Security.disableSecType(RFB.SECTYPE_NONE);
+                Security.disableSecType(RFB.SECTYPE_TLS_NONE);
+                Security.disableSecType(RFB.SECTYPE_X509_NONE);
+                Security.disableSecType(RFB.SECTYPE_TLS_VNC);
+                Security.disableSecType(RFB.SECTYPE_X509_VNC);
+                Security.disableSecType(RFB.SECTYPE_PLAIN);
+                Security.disableSecType(RFB.SECTYPE_TLS_PLAIN);
+                Security.disableSecType(RFB.SECTYPE_X509_PLAIN);
+                Security.disableSecType(RFB.SECTYPE_UNIX_LOGIN);
+                opts.tunnel = true;
+              }
+              opts.port = Hostname.getPort(session);
+            } catch (Exception e) {
+              throw new ErrorException("Session Manager Error:\n" +
+                                       e.getMessage());
+            }
+          }
+          try {
+            Tunnel.createTunnel(opts);
+            port = Hostname.getPort(opts.serverName);
+            serverName = Hostname.getHost(opts.serverName);
+          } catch (Exception e) {
+            throw new ErrorException("Could not create SSH tunnel:\n" +
+                                     e.getMessage());
+          }
+        }
+
+        if (port == 0) {
           try {
             // TurboVNC Session Manager
             String session = SessionManager.createSession(opts);
@@ -146,52 +347,17 @@ public class CConn extends CConnection implements UserPasswdGetter,
               close();
               return;
             }
-            if (Params.sessMgrAuto.getValue()) {
-              Security.disableSecType(RFB.SECTYPE_NONE);
-              Security.disableSecType(RFB.SECTYPE_TLS_NONE);
-              Security.disableSecType(RFB.SECTYPE_X509_NONE);
-              Security.disableSecType(RFB.SECTYPE_TLS_VNC);
-              Security.disableSecType(RFB.SECTYPE_X509_VNC);
-              Security.disableSecType(RFB.SECTYPE_PLAIN);
-              Security.disableSecType(RFB.SECTYPE_TLS_PLAIN);
-              Security.disableSecType(RFB.SECTYPE_X509_PLAIN);
-              Security.disableSecType(RFB.SECTYPE_UNIX_LOGIN);
-              opts.tunnel = true;
-            }
-            opts.port = Hostname.getPort(session);
+            port = Hostname.getPort(session);
+            opts.sshSession.disconnect();
           } catch (Exception e) {
             throw new ErrorException("Session Manager Error:\n" +
                                      e.getMessage());
           }
         }
-        try {
-          Tunnel.createTunnel(opts);
-          port = Hostname.getPort(opts.serverName);
-          serverName = Hostname.getHost(opts.serverName);
-        } catch (Exception e) {
-          throw new ErrorException("Could not create SSH tunnel:\n" +
-                                   e.getMessage());
-        }
-      }
 
-      if (port == 0) {
-        try {
-          // TurboVNC Session Manager
-          String session = SessionManager.createSession(opts);
-          if (session == null) {
-            close();
-            return;
-          }
-          port = Hostname.getPort(session);
-          opts.sshSession.disconnect();
-        } catch (Exception e) {
-          throw new ErrorException("Session Manager Error:\n" +
-                                   e.getMessage());
-        }
+        sock = new TcpSocket(serverName, port);
+        vlog.info("connected to host " + serverName + " port " + port);
       }
-
-      sock = new TcpSocket(serverName, port);
-      vlog.info("connected to host " + serverName + " port " + port);
     }
 
     if (benchmark) {

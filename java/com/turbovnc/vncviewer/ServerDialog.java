@@ -232,6 +232,7 @@ class ServerDialog extends Dialog implements ActionListener {
           opts.serverName = Hostname.getHost(serverName);
         }
         opts.port = Hostname.getPort(serverName);
+        opts.unixDomainPath = Hostname.getUnixDomainPath(serverName);
       }
 
       // Update the history list

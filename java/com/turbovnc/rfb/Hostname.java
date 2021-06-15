@@ -23,7 +23,18 @@ import com.turbovnc.rdr.*;
 
 public final class Hostname {
 
+  public static boolean isUnixDomain(String vncServerName) {
+    return vncServerName.indexOf(":/") >= 0;
+  }
+
   public static String getHost(String vncServerName) {
+    if (isUnixDomain(vncServerName)) {
+      int colonPos = vncServerName.indexOf(":/");
+      if (colonPos == 0)
+        return "localhost";
+      return vncServerName.substring(0, colonPos).replaceAll("\\s", "");
+    }
+
     int colonPos = vncServerName.lastIndexOf(':');
     int bracketPos = vncServerName.lastIndexOf(']');
     boolean doubleColon = false;
@@ -52,6 +63,9 @@ public final class Hostname {
   }
 
   public static int getPort(String vncServerName) {
+    if (isUnixDomain(vncServerName))
+      return -1;
+
     int colonPos = vncServerName.lastIndexOf(':');
     int bracketPos = vncServerName.lastIndexOf(']');
     boolean doubleColon = false;
@@ -89,6 +103,14 @@ public final class Hostname {
     } catch (NumberFormatException e) {
       throw new ErrorException("Invalid VNC server specified.");
     }
+  }
+
+  public static String getUnixDomainPath(String vncServerName) {
+    if (!isUnixDomain(vncServerName))
+      return null;
+
+    int colonPos = vncServerName.indexOf(":/");
+    return vncServerName.substring(colonPos + 1);
   }
 
   private Hostname() {}

@@ -43,7 +43,7 @@ public final class SessionManager extends Tunnel {
     String host =  Hostname.getHost(opts.serverName);
 
     vlog.debug("Opening SSH connection to host " + host);
-    createTunnelJSch(host, opts);
+    opts.sshSession = createTunnelJSch(host, opts);
 
     boolean firstTime = true;
     while (true) {

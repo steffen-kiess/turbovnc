@@ -80,7 +80,7 @@ public class Tunnel {
     else {
       vlog.debug("Opening SSH tunnel through gateway " + gatewayHost);
       if (opts.sshSession == null)
-        createTunnelJSch(gatewayHost, opts);
+        opts.sshSession = createTunnelJSch(gatewayHost, opts);
       vlog.debug("Forwarding local port " + localPort + " to " + remoteHost +
                  ":" + remotePort + " (relative to gateway)");
       opts.sshSession.setPortForwardingL(localPort, remoteHost, remotePort);
@@ -91,7 +91,11 @@ public class Tunnel {
 
   /* Create a tunnel using the builtin JSch SSH client */
 
-  protected static void createTunnelJSch(String host, Options opts)
+  public static Session createTunnelJSch(String host, Options opts)
+                                         throws Exception {
+    return createTunnelJSch(host, opts, null);
+  }
+  public static Session createTunnelJSch(String host, Options opts, Proxy proxy)
                                          throws Exception {
     JSch jsch = new JSch();
     JSch.setLogger(LOGGER);
@@ -216,21 +220,25 @@ public class Tunnel {
                                  privateKey.getAbsolutePath() + ":\n" +
                                  e.getMessage());
       }
-   }
+    }
 
-    opts.sshSession = jsch.getSession(user, host, port);
+    Session session = jsch.getSession(user, host, port);
+    if (proxy != null)
+      session.setProxy(proxy);
     // OpenSSHConfig doesn't recognize StrictHostKeyChecking
-    if (opts.sshSession.getConfig("StrictHostKeyChecking") == null)
-      opts.sshSession.setConfig("StrictHostKeyChecking", "ask");
-    opts.sshSession.setConfig("MaxAuthTries", "3");
+    if (session.getConfig("StrictHostKeyChecking") == null)
+      session.setConfig("StrictHostKeyChecking", "ask");
+    session.setConfig("MaxAuthTries", "3");
     String auth = System.getProperty("turbovnc.sshauth");
     if (auth == null)
       auth = "publickey,keyboard-interactive,password";
-    opts.sshSession.setConfig("PreferredAuthentications", auth);
+    session.setConfig("PreferredAuthentications", auth);
     PasswdDialog dlg = new PasswdDialog(new String("SSH Authentication"),
                                         true, user, false, true, -1);
-    opts.sshSession.setUserInfo(dlg);
-    opts.sshSession.connect();
+    session.setUserInfo(dlg);
+    session.connect();
+
+    return session;
   }
 
   /* Create a tunnel using an external SSH client.  This supports the same
