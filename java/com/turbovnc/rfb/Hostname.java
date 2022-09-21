@@ -1,4 +1,6 @@
-/* Copyright (C) 2012, 2016, 2018, 2020 D. R. Commander.  All Rights Reserved.
+/* Copyright (C) 2012, 2016, 2018, 2020, 2022 D. R. Commander.
+ *                                            All Rights Reserved.
+ * Copyright (C) 2021 Steffen Kieß
  * Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
  *
  * This is free software; you can redistribute it and/or modify
@@ -23,7 +25,18 @@ import com.turbovnc.rdr.*;
 
 public final class Hostname {
 
+  public static boolean isUDS(String vncServerName) {
+    return vncServerName.indexOf(":/") >= 0;
+  }
+
   public static String getHost(String vncServerName) {
+    if (isUDS(vncServerName)) {
+      int colonPos = vncServerName.indexOf(":/");
+      if (colonPos == 0)
+        return "localhost";
+      return vncServerName.substring(0, colonPos).replaceAll("\\s", "");
+    }
+
     int colonPos = vncServerName.lastIndexOf(':');
     int bracketPos = vncServerName.lastIndexOf(']');
     boolean doubleColon = false;
@@ -52,6 +65,9 @@ public final class Hostname {
   }
 
   public static int getPort(String vncServerName) {
+    if (isUDS(vncServerName))
+      return -1;
+
     int colonPos = vncServerName.lastIndexOf(':');
     int bracketPos = vncServerName.lastIndexOf(']');
     boolean doubleColon = false;
@@ -89,6 +105,14 @@ public final class Hostname {
     } catch (NumberFormatException e) {
       throw new ErrorException("Invalid VNC server specified.");
     }
+  }
+
+  public static String getUDSPath(String vncServerName) {
+    if (!isUDS(vncServerName))
+      return null;
+
+    int colonPos = vncServerName.indexOf(":/");
+    return vncServerName.substring(colonPos + 1);
   }
 
   private Hostname() {}

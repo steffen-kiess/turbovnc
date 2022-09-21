@@ -1,4 +1,5 @@
 /* Copyright (C) 2012-2018, 2020-2022 D. R. Commander.  All Rights Reserved.
+ * Copyright (C) 2021 Steffen Kieß
  * Copyright (C) 2011-2012, 2016 Brian P. Hinz
  * Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
  * Copyright 2004-2005 Cendio AB.
@@ -28,6 +29,7 @@ package com.turbovnc.rfb;
 import java.io.FileInputStream;
 import java.util.*;
 
+import com.turbovnc.network.Socket;
 import com.turbovnc.rdr.*;
 
 public final class Params {
@@ -541,15 +543,18 @@ public final class Params {
   public ServerNameParameter server =
   new ServerNameParameter("Server", this, false,
   "The VNC server to which to connect.  This can be specified in the " +
-  "format {host}[:{display_number}] or {host}::{port}, where {host} is the " +
-  "host name or IP address of the machine on which the VNC server is " +
-  "running (the \"VNC host\"), {display_number} is an optional X display " +
+  "format {host}[:{display_number}], {host}::{port}, or {host}:/{uds_path}, " +
+  "where {host} is the host name or IP address of the machine on which the " +
+  "VNC server is running (the \"VNC host\"), {display_number} is an " +
+  "optional X display " +
   (Utils.getBooleanProperty("turbovnc.sessmgr", true) ?
-   "number, and {port} is a TCP port.  If no port or display number is " +
-   "specified, then the viewer will enable the TurboVNC Session Manager, " +
-   "which allows you to remotely start a new TurboVNC session or to choose " +
-   "an existing TurboVNC session to which to connect." :
-   "number (default: 0), and {port} is a TCP port."), null);
+   "number, {port} is a TCP port, and {uds_path} is the path to a Unix " +
+   "domain socket on the host.  If no port, Unix domain socket path, or " +
+   "display number is specified, then the viewer will enable the TurboVNC " +
+   "Session Manager, which allows you to remotely start a new TurboVNC " +
+   "session or to choose an existing TurboVNC session to which to connect." :
+   "number (default: 0), {port} is a TCP port, and {uds_path} is the path " +
+   "to a Unix domain socket on the host."), null);
 
   public BoolParameter shared =
   new BoolParameter("Shared", this, true,
@@ -981,7 +986,9 @@ public final class Params {
   "the VNC host, so you do not need to specify it separately.  When using " +
   "the Tunnel parameter, the VNC host can be prefixed with {user}@ to " +
   "indicate that username {user} (default = local username) should be used " +
-  "when authenticating with the SSH server.\n " +
+  "when authenticating with the SSH server.  This parameter is effectly set " +
+  "if the Server parameter specifies a Unix domain socket connection to a " +
+  "remote host and the Via parameter is unset.\n " +
 
   "When using the TurboVNC Session Manager, this parameter is effectively " +
   "set unless the SessMgrAuto parameter is disabled.", false);
@@ -1030,6 +1037,8 @@ public final class Params {
   public boolean sessMgrActive, sshTunnelActive;
   public com.jcraft.jsch.Session sshSession;
   public String sshUser;
+  public Socket stdioSocket;
+  public String udsPath;
 
   // CHECKSTYLE VisibilityModifier:ON
 
