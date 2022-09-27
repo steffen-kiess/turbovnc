@@ -131,6 +131,17 @@ public class CConn extends CConnection implements UserPasswdGetter,
           !params.tunnel.get() && !server.equals("localhost"))
           params.tunnel.set(true);
 
+      // When attempting to connect to a Unix domain socket on localhost via
+      // another host, connect directly to the other host instead to avoid
+      // a pointless ssh connection to localhost.
+      if (params.udsPath != null && params.via.get() != null &&
+          server.equals("localhost")) {
+        server = params.via.get();
+        params.server.set(server);
+        params.via.set(null);
+        params.tunnel.set(true);
+      }
+
       if (params.udsPath != null && params.via.get() == null &&
           !params.tunnel.get())
         params.stdioSocket = Tunnel.connectUDSDirect(params.udsPath);

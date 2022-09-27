@@ -372,7 +372,7 @@ public class Tunnel {
                            "unix-connect:\"" + udsPath + "\"");
       pb.redirectError(ProcessBuilder.Redirect.INHERIT);
       Process p = pb.start();
-      if (p == null || p.waitFor() != 0)
+      if (p == null)
         throw new ErrorException("socat error");
       return new StreamSocket(p.getInputStream(), p.getOutputStream(), true);
     } catch (Exception e) {

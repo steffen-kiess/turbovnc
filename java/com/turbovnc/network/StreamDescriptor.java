@@ -115,7 +115,7 @@ public class StreamDescriptor implements FileDescriptor {
       throw new ErrorException("Attempted blocking read operation");
 
     if (inLen == -1)
-      return -1;  // EOF
+      return 0;  // EOF
 
     int bytesToRead = Math.min(length, inLen - inPos);
     System.arraycopy(inBuffer, inPos, buf, bufPtr, bytesToRead);
